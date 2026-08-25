@@ -48,6 +48,9 @@ export default function CalendarGrid({
     day = addDays(day, 1);
   }
 
+  // 本日の日付文字列 (yyyy-MM-dd)
+  const todayStr = format(new Date(), 'yyyy-MM-dd');
+
   return (
     <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-3 mb-6">
       <div className="flex justify-between items-center mb-3">
@@ -85,12 +88,13 @@ export default function CalendarGrid({
           const dateStr = format(cellDay, 'yyyy-MM-dd');
           const isSelected = selectedDate === dateStr;
 
-          // 対象日に該当する予定があるかチェック
+          // 対象日に該当する予定（かつ今日以降の予定）のみ抽出
           const daySchedules = schedules.filter((s) => {
             if (!s.start_at) return false;
-            // ISO文字列をローカル日付 (YYYY-MM-DD) に変換して比較
             const scheduleDateStr = format(new Date(s.start_at), 'yyyy-MM-dd');
-            return scheduleDateStr === dateStr;
+
+            // 該当日の予定であり、かつ過去の日付でないか判定
+            return scheduleDateStr === dateStr && scheduleDateStr >= todayStr;
           });
 
           const hasSchedules = daySchedules.length > 0;
@@ -111,12 +115,12 @@ export default function CalendarGrid({
                 {format(cellDay, 'd')}
               </span>
 
-              {/* 予定がある場合の目印（ドットマーク） */}
+              {/* 今日以降の予定がある場合のみバッジを表示 */}
               <div className="flex flex-col items-center justify-center gap-1 my-auto min-h-[20px]">
                 {hasSchedules && (
                   <div className="flex items-center gap-1 bg-emerald-100 text-emerald-800 text-[9px] font-bold px-1.5 py-0.5 rounded-full">
                     <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
-                    <span>{daySchedules.length}件</span>
+                    <span>{daySchedules.length}個</span>
                   </div>
                 )}
               </div>
