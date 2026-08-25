@@ -18,46 +18,58 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
-useEffect(() => {
-  const initLiff = async () => {
-    try {
-      await liff.init({ liffId: process.env.NEXT_PUBLIC_LIFF_ID! });
-      if (liff.isLoggedIn()) {
-        const profile = await liff.getProfile();
-        let { data: user } = await supabase
-          .from('users')
-          .select('id')
-          .eq('line_user_id', profile.userId)
-          .single();
-
-        if (!user) {
-          const { data: newUser } = await supabase
+  useEffect(() => {
+    const initLiff = async () => {
+      try {
+        await liff.init({ liffId: process.env.NEXT_PUBLIC_LIFF_ID! });
+        if (liff.isLoggedIn()) {
+          const profile = await liff.getProfile();
+          let { data: user } = await supabase
             .from('users')
-            .insert({ line_user_id: profile.userId, display_name: profile.displayName })
             .select('id')
+            .eq('line_user_id', profile.userId)
             .single();
-          user = newUser;
+
+          if (!user) {
+            const { data: newUser } = await supabase
+              .from('users')
+              .insert({ line_user_id: profile.userId, display_name: profile.displayName })
+              .select('id')
+              .single();
+            user = newUser;
+          }
+
+          if (user) setUserId(user.id);
         }
-
-        if (user) setUserId(user.id);
+        fetchSchedules();
+      } catch (err) {
+        console.error('LIFF Error:', err);
+      } finally {
+        setLoading(false);
       }
-      fetchSchedules();
-    } catch (err) {
-      console.error('LIFF Error:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
+    };
 
-  initLiff();
-  setDate(new Date().toISOString().split('T')[0]);
-}, []);
+    initLiff();
+    setDate(new Date().toISOString().split('T')[0]);
+  }, []);
 
+  // 変更点1: usersテーブルからdisplay_nameを一緒に取得するように修正
   const fetchSchedules = async () => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('schedules')
-      .select('*')
+      .select(`
+        *,
+        users:created_by (
+          display_name
+        )
+      `)
       .order('start_at', { ascending: true });
+
+    if (error) {
+      console.error('取得エラー:', error);
+      return;
+    }
+
     if (data) setSchedules(data);
   };
 
@@ -133,14 +145,14 @@ useEffect(() => {
       <h1 className="text-xl font-bold mb-4 text-center text-emerald-600">📱 社内予定共有カレンダー</h1>
 
       {/* マス目カレンダー表示 */}
-<CalendarGrid
-  schedules={schedules}
-  selectedDate={date}
-  onSelectDate={(selectedDate) => setDate(selectedDate)}
-  onSelectSchedule={(schedule) => {
-    handleDeleteSchedule(schedule.id, schedule.title);
-  }}
-/>
+      <CalendarGrid
+        schedules={schedules}
+        selectedDate={date}
+        onSelectDate={(selectedDate) => setDate(selectedDate)}
+        onSelectSchedule={(schedule) => {
+          handleDeleteSchedule(schedule.id, schedule.title);
+        }}
+      />
 
       {/* クイック入力フォーム */}
       <form onSubmit={handleSubmit} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 mb-6">
@@ -257,10 +269,18 @@ useEffect(() => {
                 </span>
               </div>
 
-              <div className="text-xs text-slate-500 mb-2">
-                {start.getMonth() + 1}/{start.getDate()} ({['日','月','火','水','木','金','土'][start.getDay()]}){' '}
-                {String(start.getHours()).padStart(2, '0')}:{String(start.getMinutes()).padStart(2, '0')} 〜{' '}
-                {String(end.getHours()).padStart(2, '0')}:{String(end.getMinutes()).padStart(2, '0')}
+              {/* 日時情報と投稿者名の表示エリア */}
+              <div className="text-xs text-slate-500 mb-2 flex justify-between items-center">
+                <span>
+                  {start.getMonth() + 1}/{start.getDate()} ({['日','月','火','水','木','金','土'][start.getDay()]}){' '}
+                  {String(start.getHours()).padStart(2, '0')}:{String(start.getMinutes()).padStart(2, '0')} 〜{' '}
+                  {String(end.getHours()).padStart(2, '0')}:{String(end.getMinutes()).padStart(2, '0')}
+                </span>
+                
+                {/* 変更点2: 投稿者（作成者）名を表示 */}
+                <span className="font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded text-[11px]">
+                  👤 {item.users?.display_name || '名称不明'}
+                </span>
               </div>
 
               <div className="flex gap-2 pt-2 border-t border-slate-100">
