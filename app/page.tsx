@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import liff from '@line/liff';
 import CalendarGrid from '@/components/CalendarGrid';
+import { format } from 'date-fns';
 
 const PRESET_TITLES = ['有休申請', '直行・直帰', '出張・外出', '会議・打合せ', '社内研修'];
 
@@ -50,10 +51,9 @@ export default function Home() {
     };
 
     initLiff();
-    setDate(new Date().toISOString().split('T')[0]);
+    setDate(format(new Date(), 'yyyy-MM-dd'));
   }, []);
 
-  // 変更点1: usersテーブルからdisplay_nameを一緒に取得するように修正
   const fetchSchedules = async () => {
     const { data, error } = await supabase
       .from('schedules')
@@ -137,6 +137,25 @@ export default function Home() {
       alert('削除に失敗しました。');
     }
   };
+
+  // 本日の日付文字列（yyyy-MM-dd）
+  const todayStr = format(new Date(), 'yyyy-MM-dd');
+
+  // リストに表示する予定のフィルタリング
+  const filteredSchedules = schedules.filter((item) => {
+    if (!date || !item.start_at) return false;
+
+    // Supabaseから取得した日時をローカルの日付文字列（yyyy-MM-dd）に変換
+    const scheduleDateStr = format(new Date(item.start_at), 'yyyy-MM-dd');
+
+    // 1. カレンダーでクリックして選択中の日付（date）と一致しているか
+    const isSelectedDate = scheduleDateStr === date;
+
+    // 2. 過去（今日より前）の日付でないか（本日以降か判定）
+    const isFutureOrToday = scheduleDateStr >= todayStr;
+
+    return isSelectedDate && isFutureOrToday;
+  });
 
   if (loading) return <div className="p-6 text-center text-gray-500">LINE認証中...</div>;
 
@@ -242,76 +261,84 @@ export default function Home() {
         </button>
       </form>
 
-      {/* 承認管理・予定一覧リスト */}
+      {/* 承認管理・予定一覧リスト（選択された日付かつ今日以降のみ表示） */}
       <div className="space-y-3">
-        <h2 className="font-bold text-sm text-slate-700">📋 予定・承認管理リスト</h2>
-        {schedules.map((item) => {
-          const start = new Date(item.start_at);
-          const end = new Date(item.end_at);
-          return (
-            <div key={item.id} className="bg-white rounded-xl p-3 shadow-sm border border-slate-100">
-              <div className="flex justify-between items-start mb-1">
-                <span className="font-bold text-sm text-slate-800">{item.title}</span>
-                <span
-                  className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                    item.status === 'approved'
-                      ? 'bg-emerald-100 text-emerald-800'
+        <h2 className="font-bold text-sm text-slate-700">
+          📋 予定・承認管理リスト ({date || '未選択'})
+        </h2>
+
+        {filteredSchedules.length === 0 ? (
+          <div className="bg-white rounded-xl p-4 text-center text-xs text-slate-400 border border-slate-100">
+            選択した日付の予定（または過去の予定）はありません
+          </div>
+        ) : (
+          filteredSchedules.map((item) => {
+            const start = new Date(item.start_at);
+            const end = new Date(item.end_at);
+            return (
+              <div key={item.id} className="bg-white rounded-xl p-3 shadow-sm border border-slate-100">
+                <div className="flex justify-between items-start mb-1">
+                  <span className="font-bold text-sm text-slate-800">{item.title}</span>
+                  <span
+                    className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                      item.status === 'approved'
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : item.status === 'rejected'
+                        ? 'bg-rose-100 text-rose-800'
+                        : 'bg-amber-100 text-amber-800'
+                    }`}
+                  >
+                    {item.status === 'approved'
+                      ? '承認済み'
                       : item.status === 'rejected'
-                      ? 'bg-rose-100 text-rose-800'
-                      : 'bg-amber-100 text-amber-800'
-                  }`}
-                >
-                  {item.status === 'approved'
-                    ? '承認済み'
-                    : item.status === 'rejected'
-                    ? '非承認'
-                    : '承認待ち'}
-                </span>
-              </div>
+                      ? '非承認'
+                      : '承認待ち'}
+                  </span>
+                </div>
 
-              {/* 日時情報と投稿者名の表示エリア */}
-              <div className="text-xs text-slate-500 mb-2 flex justify-between items-center">
-                <span>
-                  {start.getMonth() + 1}/{start.getDate()} ({['日','月','火','水','木','金','土'][start.getDay()]}){' '}
-                  {String(start.getHours()).padStart(2, '0')}:{String(start.getMinutes()).padStart(2, '0')} 〜{' '}
-                  {String(end.getHours()).padStart(2, '0')}:{String(end.getMinutes()).padStart(2, '0')}
-                </span>
-                
-                {/* 変更点2: 投稿者（作成者）名を表示 */}
-                <span className="font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded text-[11px]">
-                  👤 {item.users?.display_name || '名称不明'}
-                </span>
-              </div>
+                {/* 日時情報と投稿者名 */}
+                <div className="text-xs text-slate-500 mb-2 flex justify-between items-center">
+                  <span>
+                    {start.getMonth() + 1}/{start.getDate()} ({['日','月','火','水','木','金','土'][start.getDay()]}){' '}
+                    {String(start.getHours()).padStart(2, '0')}:{String(start.getMinutes()).padStart(2, '0')} 〜{' '}
+                    {String(end.getHours()).padStart(2, '0')}:{String(end.getMinutes()).padStart(2, '0')}
+                  </span>
+                  
+                  <span className="font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded text-[11px]">
+                    👤 {item.users?.display_name || '名称不明'}
+                  </span>
+                </div>
 
-              <div className="flex gap-2 pt-2 border-t border-slate-100">
-                {item.is_approval_required && (
-                  <>
-                    <button
-                      onClick={() => handleUpdateStatus(item.id, 'approved')}
-                      disabled={item.status === 'approved'}
-                      className="flex-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 disabled:opacity-40 font-bold py-1.5 rounded text-xs transition"
-                    >
-                      承認
-                    </button>
-                    <button
-                      onClick={() => handleUpdateStatus(item.id, 'rejected')}
-                      disabled={item.status === 'rejected'}
-                      className="flex-1 bg-rose-50 hover:bg-rose-100 text-rose-700 disabled:opacity-40 font-bold py-1.5 rounded text-xs transition"
-                    >
-                      非承認
-                    </button>
-                  </>
-                )}
-                <button
-                  onClick={() => handleDeleteSchedule(item.id, item.title)}
-                  className="px-3 bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-600 font-bold py-1.5 rounded text-xs transition"
-                >
-                  削除
-                </button>
+                <div className="flex gap-2 pt-2 border-t border-slate-100">
+                  {item.is_approval_required && (
+                    <>
+                      <button
+                        onClick={() => handleUpdateStatus(item.id, 'approved')}
+                        disabled={item.status === 'approved'}
+                        className="flex-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 disabled:opacity-40 font-bold py-1.5 rounded text-xs transition"
+                      >
+                        承認
+                      </button>
+                      <button
+                        onClick={() => handleUpdateStatus(item.id, 'rejected')}
+                        disabled={item.status === 'rejected'}
+                        className="flex-1 bg-rose-50 hover:bg-rose-100 text-rose-700 disabled:opacity-40 font-bold py-1.5 rounded text-xs transition"
+                      >
+                        非承認
+                      </button>
+                    </>
+                  )}
+                  <button
+                    onClick={() => handleDeleteSchedule(item.id, item.title)}
+                    className="px-3 bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-600 font-bold py-1.5 rounded text-xs transition"
+                  >
+                    削除
+                  </button>
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })
+        )}
       </div>
     </main>
   );
