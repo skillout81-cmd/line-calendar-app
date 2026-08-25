@@ -85,6 +85,16 @@ export default function CalendarGrid({
           const dateStr = format(cellDay, 'yyyy-MM-dd');
           const isSelected = selectedDate === dateStr;
 
+          // 対象日に該当する予定があるかチェック
+          const daySchedules = schedules.filter((s) => {
+            if (!s.start_at) return false;
+            // ISO文字列をローカル日付 (YYYY-MM-DD) に変換して比較
+            const scheduleDateStr = format(new Date(s.start_at), 'yyyy-MM-dd');
+            return scheduleDateStr === dateStr;
+          });
+
+          const hasSchedules = daySchedules.length > 0;
+
           return (
             <button
               key={dateStr}
@@ -92,11 +102,24 @@ export default function CalendarGrid({
               onClick={() => {
                 if (onSelectDate) onSelectDate(dateStr);
               }}
-              className={`min-h-[72px] border border-slate-100 p-1 bg-white flex flex-col cursor-pointer select-none transition text-left ${                 isSelected ? 'ring-2 ring-emerald-500 bg-emerald-50' : 'hover:bg-slate-50'               } ${!isSameMonth(cellDay, monthStart) ? 'bg-slate-50 opacity-40' : ''}`}
+              className={`min-h-[72px] border border-slate-100 p-1 bg-white flex flex-col justify-between cursor-pointer select-none transition text-left ${
+                isSelected ? 'ring-2 ring-emerald-500 bg-emerald-50' : 'hover:bg-slate-50'
+              } ${!isSameMonth(cellDay, monthStart) ? 'bg-slate-50 opacity-40' : ''}`}
             >
-              <span className="text-[10px] font-bold text-slate-600 self-end mb-1">
+              {/* 日付数字 */}
+              <span className="text-[10px] font-bold text-slate-600 self-end">
                 {format(cellDay, 'd')}
               </span>
+
+              {/* 予定がある場合の目印（ドットマーク） */}
+              <div className="flex flex-col items-center justify-center gap-1 my-auto min-h-[20px]">
+                {hasSchedules && (
+                  <div className="flex items-center gap-1 bg-emerald-100 text-emerald-800 text-[9px] font-bold px-1.5 py-0.5 rounded-full">
+                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
+                    <span>{daySchedules.length}件</span>
+                  </div>
+                )}
+              </div>
             </button>
           );
         })}
