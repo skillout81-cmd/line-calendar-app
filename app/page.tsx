@@ -19,41 +19,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => {
-    const initLiff = async () => {
-      try {
-        await liff.init({ liffId: process.env.NEXT_PUBLIC_LIFF_ID! });
-        if (liff.isLoggedIn()) {
-          const profile = await liff.getProfile();
-          let { data: user } = await supabase
-            .from('users')
-            .select('id')
-            .eq('line_user_id', profile.userId)
-            .single();
-
-          if (!user) {
-            const { data: newUser } = await supabase
-              .from('users')
-              .insert({ line_user_id: profile.userId, display_name: profile.displayName })
-              .select('id')
-              .single();
-            user = newUser;
-          }
-
-          if (user) setUserId(user.id);
-        }
-        fetchSchedules();
-      } catch (err) {
-        console.error('LIFF Error:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    initLiff();
-    setDate(format(new Date(), 'yyyy-MM-dd'));
-  }, []);
-
+  // 予定一覧の取得
   const fetchSchedules = async () => {
     const { data, error } = await supabase
       .from('schedules')
@@ -73,9 +39,74 @@ export default function Home() {
     if (data) setSchedules(data);
   };
 
+  // 初回ロード時のLIFF初期化およびユーザー登録
+  useEffect(() => {
+    const initLiff = async () => {
+      try {
+        await liff.init({ liffId: process.env.NEXT_PUBLIC_LIFF_ID! });
+
+        // 未ログイン状態の場合は、自動的にLINEログイン画面へ遷移させる
+        if (!liff.isLoggedIn()) {
+          liff.login();
+          return;
+        }
+
+        // LINEプロフィールを取得
+        const profile = await liff.getProfile();
+
+        // Supabaseからユーザーを検索
+        let { data: user, error: selectError } = await supabase
+          .from('users')
+          .select('id')
+          .eq('line_user_id', profile.userId)
+          .maybeSingle();
+
+        if (selectError) {
+          console.error('ユーザー検索エラー:', selectError);
+        }
+
+        // 存在しない場合は新規登録
+        if (!user) {
+          const { data: newUser, error: insertError } = await supabase
+            .from('users')
+            .insert({ line_user_id: profile.userId, display_name: profile.displayName })
+            .select('id')
+            .single();
+
+          if (insertError) {
+            console.error('ユーザー追加エラー:', insertError);
+            alert(`ユーザー登録に失敗しました: ${insertError.message}`);
+          } else {
+            user = newUser;
+          }
+        }
+
+        if (user) {
+          setUserId(user.id);
+        } else {
+          alert('ユーザーIDの取得に失敗しました。ページを再読み込みしてください。');
+        }
+
+        await fetchSchedules();
+      } catch (err: any) {
+        console.error('LIFF Error:', err);
+        alert(`LINE認証エラーが発生しました: ${err.message || err}`);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    initLiff();
+    setDate(format(new Date(), 'yyyy-MM-dd'));
+  }, []); // 依存配列を空にして初回1回のみ実行
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title || !date || !userId) return alert('入力内容を確認してください。');
+
+    // デバッグ用メッセージ
+    if (!title) return alert('件名を入力してください。');
+    if (!date) return alert('日付を選択してください。');
+    if (!userId) return alert('ユーザー認証が完了していません。ページを再読み込みしてください。');
 
     setSubmitting(true);
     const startAt = new Date(`${date}T${startTime}:00`).toISOString();
@@ -94,24 +125,30 @@ export default function Home() {
 
       if (error) throw error;
 
+      // LINEで共有
       if (liff.isApiAvailable('shareTargetPicker')) {
         const typeText = isApprovalRequired ? '【承認申請】' : '【予定共有】';
-        liff.shareTargetPicker([
-          {
-            type: 'text',
-            text: `📅 ${typeText}\n${title}\n日時: ${date} ${startTime}〜${endTime}\n状態: ${
-              isApprovalRequired ? '承認待ち' : '登録完了'
-            }`,
-          },
-        ]).catch(() => {});
+        try {
+          await liff.shareTargetPicker([
+            {
+              type: 'text',
+              text: `📅 ${typeText}\n${title}\n日時: ${date} ${startTime}〜${endTime}\n状態: ${
+                isApprovalRequired ? '承認待ち' : '登録完了'
+              }`,
+            },
+          ]);
+        } catch (pickerErr) {
+          console.warn('シェアターゲットピッカーがキャンセルまたは失敗しました:', pickerErr);
+        }
       }
 
       setTitle('');
       setIsApprovalRequired(false);
       fetchSchedules();
       alert('予定を追加しました！');
-    } catch (err) {
-      alert('登録に失敗しました。');
+    } catch (err: any) {
+      console.error('登録エラー:', err);
+      alert(`登録に失敗しました: ${err.message || err}`);
     } finally {
       setSubmitting(false);
     }
@@ -138,20 +175,13 @@ export default function Home() {
     }
   };
 
-  // 本日の日付文字列（yyyy-MM-dd）
   const todayStr = format(new Date(), 'yyyy-MM-dd');
 
-  // リストに表示する予定のフィルタリング
   const filteredSchedules = schedules.filter((item) => {
     if (!date || !item.start_at) return false;
 
-    // Supabaseから取得した日時をローカルの日付文字列（yyyy-MM-dd）に変換
     const scheduleDateStr = format(new Date(item.start_at), 'yyyy-MM-dd');
-
-    // 1. カレンダーでクリックして選択中の日付（date）と一致しているか
     const isSelectedDate = scheduleDateStr === date;
-
-    // 2. 過去（今日より前）の日付でないか（本日以降か判定）
     const isFutureOrToday = scheduleDateStr >= todayStr;
 
     return isSelectedDate && isFutureOrToday;
@@ -163,7 +193,6 @@ export default function Home() {
     <main className="min-h-screen bg-slate-50 p-4 max-w-md mx-auto text-slate-800">
       <h1 className="text-xl font-bold mb-4 text-center text-emerald-600">📱 社内予定共有カレンダー</h1>
 
-      {/* マス目カレンダー表示 */}
       <CalendarGrid
         schedules={schedules}
         selectedDate={date}
@@ -173,7 +202,6 @@ export default function Home() {
         }}
       />
 
-      {/* クイック入力フォーム */}
       <form onSubmit={handleSubmit} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 mb-6">
         <h2 className="font-bold text-sm mb-3 text-slate-700">＋ 予定のクイック入力</h2>
 
@@ -255,13 +283,12 @@ export default function Home() {
         <button
           type="submit"
           disabled={submitting}
-          className="w-full bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 text-white font-bold py-3 rounded-lg text-sm transition shadow"
+          className="w-full bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 text-white font-bold py-3 rounded-lg text-sm transition shadow disabled:opacity-50"
         >
           {submitting ? '保存中...' : '予定を追加してLINEで共有'}
         </button>
       </form>
 
-      {/* 承認管理・予定一覧リスト（選択された日付かつ今日以降のみ表示） */}
       <div className="space-y-3">
         <h2 className="font-bold text-sm text-slate-700">
           📋 予定・承認管理リスト ({date || '未選択'})
@@ -296,14 +323,13 @@ export default function Home() {
                   </span>
                 </div>
 
-                {/* 日時情報と投稿者名 */}
                 <div className="text-xs text-slate-500 mb-2 flex justify-between items-center">
                   <span>
                     {start.getMonth() + 1}/{start.getDate()} ({['日','月','火','水','木','金','土'][start.getDay()]}){' '}
                     {String(start.getHours()).padStart(2, '0')}:{String(start.getMinutes()).padStart(2, '0')} 〜{' '}
                     {String(end.getHours()).padStart(2, '0')}:{String(end.getMinutes()).padStart(2, '0')}
                   </span>
-                  
+
                   <span className="font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded text-[11px]">
                     👤 {item.users?.display_name || '名称不明'}
                   </span>
