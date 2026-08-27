@@ -126,23 +126,7 @@ export default function Home() {
 
       if (error) throw error;
 
-      // LINE共有処理
-      if (liff.isApiAvailable('shareTargetPicker')) {
-        const typeText = isApprovalRequired ? '【承認申請】' : '【予定共有】';
-        try {
-          await liff.shareTargetPicker([
-            {
-              type: 'text',
-              text: `📅 ${typeText}\n${title}\n日時: ${date} ${startTime}〜${endTime}\n状態: ${
-                isApprovalRequired ? '承認待ち' : '登録完了'
-              }`,
-            },
-          ]);
-        } catch (pickerErr) {
-          console.warn('シェアターゲットピッカーが閉じるか失敗しました:', pickerErr);
-        }
-      }
-
+      // フォームの初期化と更新
       setTitle('');
       setIsApprovalRequired(false);
       fetchSchedules();
@@ -286,7 +270,7 @@ export default function Home() {
           disabled={submitting}
           className="w-full bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 text-white font-bold py-3 rounded-lg text-sm transition shadow disabled:opacity-50"
         >
-          {submitting ? '保存中...' : '予定を追加してLINEで共有'}
+          {submitting ? '保存中...' : '予定を追加'}
         </button>
       </form>
 
