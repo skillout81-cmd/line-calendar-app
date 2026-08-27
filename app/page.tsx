@@ -45,13 +45,15 @@ export default function Home() {
       try {
         await liff.init({ liffId: process.env.NEXT_PUBLIC_LIFF_ID! });
 
-        // 未ログイン状態の場合は、自動的にLINEログイン画面へ遷移させる
+        // LINEアプリ外（外部ブラウザ）で未ログインの場合のみログインへリダイレクト
         if (!liff.isLoggedIn()) {
-          liff.login();
-          return;
+          if (!liff.isInClient()) {
+            liff.login({ redirectUri: window.location.href });
+            return;
+          }
         }
 
-        // LINEプロフィールを取得
+        // LINEプロフィールの取得
         const profile = await liff.getProfile();
 
         // Supabaseからユーザーを検索
@@ -65,7 +67,7 @@ export default function Home() {
           console.error('ユーザー検索エラー:', selectError);
         }
 
-        // 存在しない場合は新規登録
+        // ユーザーが存在しない場合は新規作成
         if (!user) {
           const { data: newUser, error: insertError } = await supabase
             .from('users')
@@ -75,7 +77,7 @@ export default function Home() {
 
           if (insertError) {
             console.error('ユーザー追加エラー:', insertError);
-            alert(`ユーザー登録に失敗しました: ${insertError.message}`);
+            alert(`ユーザー登録エラー: ${insertError.message}`);
           } else {
             user = newUser;
           }
@@ -84,13 +86,13 @@ export default function Home() {
         if (user) {
           setUserId(user.id);
         } else {
-          alert('ユーザーIDの取得に失敗しました。ページを再読み込みしてください。');
+          alert('ユーザー情報の読み込みに失敗しました。再読み込みしてください。');
         }
 
         await fetchSchedules();
       } catch (err: any) {
         console.error('LIFF Error:', err);
-        alert(`LINE認証エラーが発生しました: ${err.message || err}`);
+        alert(`LINE認証エラー: ${err.message || err}`);
       } finally {
         setLoading(false);
       }
@@ -98,12 +100,11 @@ export default function Home() {
 
     initLiff();
     setDate(format(new Date(), 'yyyy-MM-dd'));
-  }, []); // 依存配列を空にして初回1回のみ実行
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // デバッグ用メッセージ
     if (!title) return alert('件名を入力してください。');
     if (!date) return alert('日付を選択してください。');
     if (!userId) return alert('ユーザー認証が完了していません。ページを再読み込みしてください。');
@@ -125,7 +126,7 @@ export default function Home() {
 
       if (error) throw error;
 
-      // LINEで共有
+      // LINE共有処理
       if (liff.isApiAvailable('shareTargetPicker')) {
         const typeText = isApprovalRequired ? '【承認申請】' : '【予定共有】';
         try {
@@ -138,7 +139,7 @@ export default function Home() {
             },
           ]);
         } catch (pickerErr) {
-          console.warn('シェアターゲットピッカーがキャンセルまたは失敗しました:', pickerErr);
+          console.warn('シェアターゲットピッカーが閉じるか失敗しました:', pickerErr);
         }
       }
 
