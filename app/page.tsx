@@ -110,8 +110,10 @@ export default function Home() {
     if (!userId) return alert('ユーザー認証が完了していません。ページを再読み込みしてください。');
 
     setSubmitting(true);
-    const startAt = new Date(`${date}T${startTime}:00`).toISOString();
-    const endAt = new Date(`${date}T${endTime}:00`).toISOString();
+
+    // ISO文字列作成時、ローカルタイムゾーン（JST）の形式をそのまま保存できるように調整
+    const startAt = `${date}T${startTime}:00`;
+    const endAt = `${date}T${endTime}:00`;
     const status = isApprovalRequired ? 'pending' : 'approved';
 
     try {
