@@ -8,6 +8,13 @@ import { format } from 'date-fns';
 
 const PRESET_TITLES = ['有休申請', '直行・直帰', '出張・外出', '会議・打合せ', '社内研修'];
 
+// 30分刻みの時間リスト (00:00 〜 23:30)
+const TIME_OPTIONS = Array.from({ length: 48 }, (_, i) => {
+  const hour = String(Math.floor(i / 2)).padStart(2, '0');
+  const minute = i % 2 === 0 ? '00' : '30';
+  return `${hour}:${minute}`;
+});
+
 export default function Home() {
   const [title, setTitle] = useState('');
   const [date, setDate] = useState('');
@@ -39,7 +46,7 @@ export default function Home() {
     if (data) setSchedules(data);
   }, []);
 
-  // 初回ロード時のLIFF初期化およびユーザー登録 (Upsert化)
+  // 初回ロード時のLIFF初期化およびユーザー登録 (Upsert)
   useEffect(() => {
     const initLiff = async () => {
       try {
@@ -54,7 +61,6 @@ export default function Home() {
 
         const profile = await liff.getProfile();
 
-        // line_user_id をキーにして upsert (作成または更新)
         const { data: user, error: upsertError } = await supabase
           .from('users')
           .upsert(
@@ -96,7 +102,6 @@ export default function Home() {
 
     setSubmitting(true);
 
-    // JSTのタイムゾーンを明示 (+09:00)
     const startAt = `${date}T${startTime}:00+09:00`;
     const endAt = `${date}T${endTime}:00+09:00`;
     const status = isApprovalRequired ? 'pending' : 'approved';
@@ -152,7 +157,6 @@ export default function Home() {
     }
   };
 
-  // 選択された日付の予定のみを抽出（過去日付でも参照可能に修正）
   const filteredSchedules = schedules.filter((item) => {
     if (!date || !item.start_at) return false;
     const scheduleDateStr = format(new Date(item.start_at), 'yyyy-MM-dd');
@@ -170,7 +174,6 @@ export default function Home() {
         selectedDate={date}
         onSelectDate={(selectedDate) => setDate(selectedDate)}
         onSelectSchedule={(schedule) => {
-          // 自身の作成した予定のみ削除を許容する場合は条件判定を追加
           handleDeleteSchedule(schedule.id, schedule.title);
         }}
       />
@@ -200,6 +203,7 @@ export default function Home() {
           required
         />
 
+        {/* 日時入力エリア */}
         <div className="mb-3 space-y-2">
           <input
             type="date"
@@ -208,20 +212,38 @@ export default function Home() {
             className="w-full border rounded-lg p-2 text-sm bg-slate-50"
             required
           />
-          <div className="flex items-center gap-2">
-            <input
-              type="time"
-              value={startTime}
-              onChange={(e) => setStartTime(e.target.value)}
-              className="flex-1 border rounded-lg p-2 text-sm bg-slate-50"
-            />
-            <span className="text-xs text-slate-400">〜</span>
-            <input
-              type="time"
-              value={endTime}
-              onChange={(e) => setEndTime(e.target.value)}
-              className="flex-1 border rounded-lg p-2 text-sm bg-slate-50"
-            />
+
+          {/* 30分刻みプルダウン化＆レスポンシブ崩れ防止 */}
+          <div className="flex items-center gap-1.5 w-full">
+            <div className="flex-1 min-w-0">
+              <select
+                value={startTime}
+                onChange={(e) => setStartTime(e.target.value)}
+                className="w-full border rounded-lg p-2 text-xs bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              >
+                {TIME_OPTIONS.map((time) => (
+                  <option key={`start-${time}`} value={time}>
+                    {time}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <span className="text-xs text-slate-400 shrink-0">〜</span>
+
+            <div className="flex-1 min-w-0">
+              <select
+                value={endTime}
+                onChange={(e) => setEndTime(e.target.value)}
+                className="w-full border rounded-lg p-2 text-xs bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              >
+                {TIME_OPTIONS.map((time) => (
+                  <option key={`end-${time}`} value={time}>
+                    {time}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
 
@@ -329,7 +351,6 @@ export default function Home() {
                       </button>
                     </>
                   )}
-                  {/* 作成者本人のみ削除可能にする場合などの制御 */}
                   {(isOwner || true) && (
                     <button
                       onClick={() => handleDeleteSchedule(item.id, item.title)}
