@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import liff from '@line/liff';
 import CalendarGrid from '@/components/CalendarGrid';
@@ -20,7 +20,7 @@ export default function Home() {
   const [submitting, setSubmitting] = useState(false);
 
   // 予定一覧の取得
-  const fetchSchedules = async () => {
+  const fetchSchedules = useCallback(async () => {
     const { data, error } = await supabase
       .from('schedules')
       .select(`
@@ -37,15 +37,14 @@ export default function Home() {
     }
 
     if (data) setSchedules(data);
-  };
+  }, []);
 
-  // 初回ロード時のLIFF初期化およびユーザー登録
+  // 初回ロード時のLIFF初期化およびユーザー登録 (Upsert化)
   useEffect(() => {
     const initLiff = async () => {
       try {
         await liff.init({ liffId: process.env.NEXT_PUBLIC_LIFF_ID! });
 
-        // LINEアプリ外（外部ブラウザ）で未ログインの場合のみログインへリダイレクト
         if (!liff.isLoggedIn()) {
           if (!liff.isInClient()) {
             liff.login({ redirectUri: window.location.href });
@@ -53,40 +52,26 @@ export default function Home() {
           }
         }
 
-        // LINEプロフィールの取得
         const profile = await liff.getProfile();
 
-        // Supabaseからユーザーを検索
-        let { data: user, error: selectError } = await supabase
+        // line_user_id をキーにして upsert (作成または更新)
+        const { data: user, error: upsertError } = await supabase
           .from('users')
+          .upsert(
+            { line_user_id: profile.userId, display_name: profile.displayName },
+            { onConflict: 'line_user_id' }
+          )
           .select('id')
-          .eq('line_user_id', profile.userId)
-          .maybeSingle();
+          .single();
 
-        if (selectError) {
-          console.error('ユーザー検索エラー:', selectError);
-        }
-
-        // ユーザーが存在しない場合は新規作成
-        if (!user) {
-          const { data: newUser, error: insertError } = await supabase
-            .from('users')
-            .insert({ line_user_id: profile.userId, display_name: profile.displayName })
-            .select('id')
-            .single();
-
-          if (insertError) {
-            console.error('ユーザー追加エラー:', insertError);
-            alert(`ユーザー登録エラー: ${insertError.message}`);
-          } else {
-            user = newUser;
-          }
+        if (upsertError) {
+          console.error('ユーザー同期エラー:', upsertError);
+          alert(`ユーザー同期エラー: ${upsertError.message}`);
+          return;
         }
 
         if (user) {
           setUserId(user.id);
-        } else {
-          alert('ユーザー情報の読み込みに失敗しました。再読み込みしてください。');
         }
 
         await fetchSchedules();
@@ -100,20 +85,20 @@ export default function Home() {
 
     initLiff();
     setDate(format(new Date(), 'yyyy-MM-dd'));
-  }, []);
+  }, [fetchSchedules]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!title) return alert('件名を入力してください。');
     if (!date) return alert('日付を選択してください。');
-    if (!userId) return alert('ユーザー認証が完了していません。ページを再読み込みしてください。');
+    if (!userId) return alert('ユーザー認証が完了していません。再読み込みしてください。');
 
     setSubmitting(true);
 
-    // ISO文字列作成時、ローカルタイムゾーン（JST）の形式をそのまま保存できるように調整
-    const startAt = `${date}T${startTime}:00`;
-    const endAt = `${date}T${endTime}:00`;
+    // JSTのタイムゾーンを明示 (+09:00)
+    const startAt = `${date}T${startTime}:00+09:00`;
+    const endAt = `${date}T${endTime}:00+09:00`;
     const status = isApprovalRequired ? 'pending' : 'approved';
 
     try {
@@ -128,10 +113,9 @@ export default function Home() {
 
       if (error) throw error;
 
-      // フォームの初期化と更新
       setTitle('');
       setIsApprovalRequired(false);
-      fetchSchedules();
+      await fetchSchedules();
       alert('予定を追加しました！');
     } catch (err: any) {
       console.error('登録エラー:', err);
@@ -142,8 +126,14 @@ export default function Home() {
   };
 
   const handleUpdateStatus = async (id: string, newStatus: 'approved' | 'rejected') => {
-    await supabase.from('schedules').update({ status: newStatus }).eq('id', id);
-    fetchSchedules();
+    try {
+      const { error } = await supabase.from('schedules').update({ status: newStatus }).eq('id', id);
+      if (error) throw error;
+      fetchSchedules();
+    } catch (err) {
+      console.error('更新エラー:', err);
+      alert('状態の更新に失敗しました。');
+    }
   };
 
   const handleDeleteSchedule = async (id: string, scheduleTitle: string) => {
@@ -162,16 +152,11 @@ export default function Home() {
     }
   };
 
-  const todayStr = format(new Date(), 'yyyy-MM-dd');
-
+  // 選択された日付の予定のみを抽出（過去日付でも参照可能に修正）
   const filteredSchedules = schedules.filter((item) => {
     if (!date || !item.start_at) return false;
-
     const scheduleDateStr = format(new Date(item.start_at), 'yyyy-MM-dd');
-    const isSelectedDate = scheduleDateStr === date;
-    const isFutureOrToday = scheduleDateStr >= todayStr;
-
-    return isSelectedDate && isFutureOrToday;
+    return scheduleDateStr === date;
   });
 
   if (loading) return <div className="p-6 text-center text-gray-500">LINE認証中...</div>;
@@ -185,6 +170,7 @@ export default function Home() {
         selectedDate={date}
         onSelectDate={(selectedDate) => setDate(selectedDate)}
         onSelectSchedule={(schedule) => {
+          // 自身の作成した予定のみ削除を許容する場合は条件判定を追加
           handleDeleteSchedule(schedule.id, schedule.title);
         }}
       />
@@ -283,12 +269,14 @@ export default function Home() {
 
         {filteredSchedules.length === 0 ? (
           <div className="bg-white rounded-xl p-4 text-center text-xs text-slate-400 border border-slate-100">
-            選択した日付の予定（または過去の予定）はありません
+            選択した日付の予定はありません
           </div>
         ) : (
           filteredSchedules.map((item) => {
             const start = new Date(item.start_at);
             const end = new Date(item.end_at);
+            const isOwner = item.created_by === userId;
+
             return (
               <div key={item.id} className="bg-white rounded-xl p-3 shadow-sm border border-slate-100">
                 <div className="flex justify-between items-start mb-1">
@@ -341,12 +329,15 @@ export default function Home() {
                       </button>
                     </>
                   )}
-                  <button
-                    onClick={() => handleDeleteSchedule(item.id, item.title)}
-                    className="px-3 bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-600 font-bold py-1.5 rounded text-xs transition"
-                  >
-                    削除
-                  </button>
+                  {/* 作成者本人のみ削除可能にする場合などの制御 */}
+                  {(isOwner || true) && (
+                    <button
+                      onClick={() => handleDeleteSchedule(item.id, item.title)}
+                      className="px-3 bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-600 font-bold py-1.5 rounded text-xs transition"
+                    >
+                      削除
+                    </button>
+                  )}
                 </div>
               </div>
             );
