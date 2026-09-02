@@ -46,7 +46,7 @@ export default function Home() {
     if (data) setSchedules(data);
   }, []);
 
-  // 初回ロード時のLIFF初期化およびユーザー登録 (Upsert)
+  // 初回ロード時のLIFF初期化およびユーザー情報参照
   useEffect(() => {
     const initLiff = async () => {
       try {
@@ -61,23 +61,23 @@ export default function Home() {
 
         const profile = await liff.getProfile();
 
-        const { data: user, error: upsertError } = await supabase
+        // 直接 upsert は実行せず、Trigger で同期されたユーザー情報を参照する
+        const { data: user, error: selectError } = await supabase
           .from('users')
-          .upsert(
-            { line_user_id: profile.userId, display_name: profile.displayName },
-            { onConflict: 'line_user_id' }
-          )
           .select('id')
-          .single();
+          .eq('line_user_id', profile.userId)
+          .maybeSingle();
 
-        if (upsertError) {
-          console.error('ユーザー同期エラー:', upsertError);
-          alert(`ユーザー同期エラー: ${upsertError.message}`);
+        if (selectError) {
+          console.error('ユーザー同期エラー:', selectError);
+          alert(`ユーザー同期エラー: ${selectError.message}`);
           return;
         }
 
         if (user) {
           setUserId(user.id);
+        } else {
+          console.warn('ユーザー情報が初期化されていません。');
         }
 
         await fetchSchedules();
@@ -351,7 +351,7 @@ export default function Home() {
                       </button>
                     </>
                   )}
-                  {(isOwner || true) && (
+                  {isOwner && (
                     <button
                       onClick={() => handleDeleteSchedule(item.id, item.title)}
                       className="px-3 bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-600 font-bold py-1.5 rounded text-xs transition"
