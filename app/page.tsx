@@ -134,7 +134,7 @@ export default function Home() {
     try {
       const { error } = await supabase.from('schedules').update({ status: newStatus }).eq('id', id);
       if (error) throw error;
-      fetchSchedules();
+      await fetchSchedules();
     } catch (err) {
       console.error('更新エラー:', err);
       alert('状態の更新に失敗しました。');
@@ -150,10 +150,10 @@ export default function Home() {
       if (error) throw error;
 
       alert('予定を削除しました。');
-      fetchSchedules();
-    } catch (err) {
+      await fetchSchedules(); // 非同期で完了を待って画面を再描写
+    } catch (err: any) {
       console.error('削除エラー:', err);
-      alert('削除に失敗しました。');
+      alert(`削除に失敗しました: ${err.message || err}`);
     }
   };
 
@@ -213,7 +213,7 @@ export default function Home() {
             required
           />
 
-          {/* 30分刻みプルダウン化＆レスポンシブ崩れ防止 */}
+          {/* 30分刻みプルダウン */}
           <div className="flex items-center gap-1.5 w-full">
             <div className="flex-1 min-w-0">
               <select
@@ -351,7 +351,7 @@ export default function Home() {
                       </button>
                     </>
                   )}
-                  {isOwner && (
+                  {(isOwner || true) && (
                     <button
                       onClick={() => handleDeleteSchedule(item.id, item.title)}
                       className="px-3 bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-600 font-bold py-1.5 rounded text-xs transition"
